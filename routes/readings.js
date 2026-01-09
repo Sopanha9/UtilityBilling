@@ -1,40 +1,37 @@
 const express = require("express");
 const router = express.Router();
+const multer = require("multer");
+const TelegramBot = require("node-telegram-bot-api");
 const Customer = require("../models/Customer");
 const Reading = require("../models/Reading");
-const puppeteer = require("puppeteer");
-const TelegramBot = require("node-telegram-bot-api");
-const { Readable } = require("stream");
+
+// Configure Multer for memory storage
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
 
 // Initialize Telegram Bot
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: false });
 
-// មុខងារបង្កើត PDF ជាភាសាខ្មែរ
-const generatePDF = async (htmlContent) => {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-  });
-  const page = await browser.newPage();
-  await page.setContent(htmlContent, { waitUntil: "domcontentloaded" });
-  const pdfBuffer = await page.pdf({ format: "A5", printBackground: true });
-  await browser.close();
-  return pdfBuffer;
-};
-
 // API សម្រាប់កត់កុងទ័រ និងគណនាលុយ (Record & Bill)
-router.post("/record", async (req, res, next) => {
+// Now accepts multipart/form-data with a 'pdfFile'
+router.post("/record", upload.single("pdfFile"), async (req, res, next) => {
   try {
     const { customerId, newReading } = req.body;
+    const pdfFile = req.file;
 
     // Validation
     if (!customerId || newReading === undefined) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Please provide customerId and newReading",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Please provide customerId and newReading",
+      });
+    }
+
+    if (!pdfFile) {
+      return res.status(400).json({
+        success: false,
+        message: "Please attach the generated PDF file (field name: 'pdfFile')",
+      });
     }
 
     // 1. រកអតិថិជន
@@ -47,16 +44,19 @@ router.post("/record", async (req, res, next) => {
     const oldReading = customer.last_reading;
 
     // Validation: New reading cannot be less than old reading
-    if (newReading < oldReading) {
+    // Note: parsed as float just in case, though usually mongoose handles usage
+    const newReadingNum = parseFloat(newReading);
+
+    if (newReadingNum < oldReading) {
       return res.status(400).json({
         success: false,
         message: "New reading cannot be strictly lower than old reading",
-        details: { old: oldReading, new: newReading },
+        details: { old: oldReading, new: newReadingNum },
       });
     }
 
     // 2. គណនា Logic < 5 unit ឬ >= 5 unit
-    const usage = newReading - oldReading;
+    const usage = newReadingNum - oldReading;
     const pricePerUnit = usage < 5 ? 4000 : 3000;
     const totalAmount = usage * pricePerUnit;
 
@@ -64,7 +64,7 @@ router.post("/record", async (req, res, next) => {
     const newRecord = new Reading({
       customer: customerId,
       old_reading: oldReading,
-      new_reading: newReading,
+      new_reading: newReadingNum,
       usage: usage,
       total_price: totalAmount,
       // date will be auto-set by default
@@ -72,85 +72,18 @@ router.post("/record", async (req, res, next) => {
     await newRecord.save();
 
     // 4. Update លេខកុងទ័រចុងក្រោយរបស់អតិថិជនសម្រាប់ខែក្រោយ
-    customer.last_reading = newReading;
+    customer.last_reading = newReadingNum;
     await customer.save();
 
-    // 5. បង្កើត PDF និងផ្ញើទៅ Telegram
-    const htmlLayout = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <style>
-                    body {
-                        font-family: 'Khmer OS Battambang', 'Khmer OS Siemreap', sans-serif;
-                        padding: 20px;
-                    }
-                    h2 {
-                        text-align: center;
-                        color: #333;
-                        border-bottom: 2px solid #4CAF50;
-                        padding-bottom: 10px;
-                    }
-                    .info {
-                        margin: 15px 0;
-                        font-size: 14px;
-                    }
-                    .total {
-                        margin-top: 20px;
-                        padding: 15px;
-                        background-color: #f0f0f0;
-                        border-radius: 5px;
-                    }
-                    .total h3 {
-                        color: #d32f2f;
-                        margin: 0;
-                        font-size: 18px;
-                    }
-                    .date {
-                        text-align: right;
-                        font-size: 12px;
-                        color: #666;
-                    }
-                </style>
-            </head>
-            <body>
-                <h2>វិក្កយបត្របង់ប្រាក់</h2>
-                <div class="date">កាលបរិច្ឆេទ៖ ${new Date().toLocaleDateString(
-      "km-KH"
-    )}</div>
-                <div class="info">
-                    <p><strong>អតិថិជន៖</strong> ${customer.name}</p>
-                    <p><strong>លេខកុងទ័រចាស់៖</strong> ${oldReading} Unit</p>
-                    <p><strong>លេខកុងទ័រថ្មី៖</strong> ${newReading} Unit</p>
-                    <p><strong>ប្រើអស់៖</strong> ${usage} Unit</p>
-                    <p><strong>តម្លៃក្នុងមួយ Unit៖</strong> ${pricePerUnit.toLocaleString()} រៀល</p>
-                </div>
-                <div class="total">
-                    <h3>សរុប៖ ${totalAmount.toLocaleString()} រៀល</h3>
-                </div>
-            </body>
-            </html>
-        `;
-
-    let pdfFile;
-    try {
-      console.log("Generating PDF...");
-      pdfFile = await generatePDF(htmlLayout);
-      console.log("PDF generated successfully. Size:", pdfFile.length);
-    } catch (pdfError) {
-      console.error("⚠️ Failed to generate PDF:", pdfError);
-    }
-
+    // 5. ផ្ញើ PDF ទៅ Telegram
     if (pdfFile) {
       try {
-        console.log("Sending PDF to Telegram...");
-        const fileStream = Readable.from(pdfFile);
+        console.log("Sending received PDF to Telegram...");
 
-        // ផ្ញើឯកសារ PDF ទៅ Telegram
+        // bot.sendDocument accepts a Buffer directly if specified with filename options
         await bot.sendDocument(
           process.env.MOM_CHAT_ID,
-          fileStream,
+          pdfFile.buffer,
           {
             caption: `វិក្កយបត្ររបស់៖ ${customer.name}\nសរុប៖ ${totalAmount.toLocaleString()} រៀល`,
           },
@@ -163,13 +96,13 @@ router.post("/record", async (req, res, next) => {
         console.log(`✅ PDF sent to Telegram for ${customer.name}`);
       } catch (telegramError) {
         console.error("⚠️ Failed to send to Telegram:", telegramError);
-        // Continue even if Telegram fails
+        // We continue even if Telegram fails, as the record is saved
       }
     }
 
     res.json({
       success: true,
-      message: "ជោគជ័យ! PDF បានផ្ញើទៅ Telegram រួចរាល់!",
+      message: "ជោគជ័យ! ទិន្នន័យត្រូវបានរក្សាទុក និង PDF ត្រូវបានផ្ញើ (ប្រសិនបើមាន)!",
       data: newRecord,
     });
   } catch (err) {
@@ -189,7 +122,7 @@ router.get("/history/:customerId", async (req, res, next) => {
   }
 });
 
-// ទាញយកវិក្កយបត្រចុងក្រោយបង្អស់សម្រាប់ Print
+// ទាញយកវិក្កយបត្រចុងក្រោយបង្អស់សម្រាប់ Print (Client-side usage)
 router.get("/receipt/:customerId", async (req, res, next) => {
   try {
     const latestReading = await Reading.findOne({
