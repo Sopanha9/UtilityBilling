@@ -4,6 +4,7 @@ const Customer = require("../models/Customer");
 const Reading = require("../models/Reading");
 const puppeteer = require("puppeteer");
 const TelegramBot = require("node-telegram-bot-api");
+const { Readable } = require("stream");
 
 // Initialize Telegram Bot
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: false });
@@ -132,27 +133,38 @@ router.post("/record", async (req, res, next) => {
             </html>
         `;
 
+    let pdfFile;
     try {
-      const pdfFile = await generatePDF(htmlLayout);
+      console.log("Generating PDF...");
+      pdfFile = await generatePDF(htmlLayout);
+      console.log("PDF generated successfully. Size:", pdfFile.length);
+    } catch (pdfError) {
+      console.error("⚠️ Failed to generate PDF:", pdfError);
+    }
 
-      // ផ្ញើឯកសារ PDF ទៅ Telegram
-      await bot.sendDocument(
-        process.env.MOM_CHAT_ID,
-        pdfFile,
-        {
-          caption: `វិក្កយបត្ររបស់៖ ${customer.name
-            }\nសរុប៖ ${totalAmount.toLocaleString()} រៀល`,
-        },
-        {
-          filename: `Receipt_${customer.name}_${Date.now()}.pdf`,
-          contentType: "application/pdf",
-        }
-      );
+    if (pdfFile) {
+      try {
+        console.log("Sending PDF to Telegram...");
+        const fileStream = Readable.from(pdfFile);
 
-      console.log(`✅ PDF sent to Telegram for ${customer.name}`);
-    } catch (telegramError) {
-      console.error("⚠️ Failed to send to Telegram:", telegramError.message);
-      // Continue even if Telegram fails
+        // ផ្ញើឯកសារ PDF ទៅ Telegram
+        await bot.sendDocument(
+          process.env.MOM_CHAT_ID,
+          fileStream,
+          {
+            caption: `វិក្កយបត្ររបស់៖ ${customer.name}\nសរុប៖ ${totalAmount.toLocaleString()} រៀល`,
+          },
+          {
+            filename: `Receipt_${customer.name}_${Date.now()}.pdf`,
+            contentType: "application/pdf",
+          }
+        );
+
+        console.log(`✅ PDF sent to Telegram for ${customer.name}`);
+      } catch (telegramError) {
+        console.error("⚠️ Failed to send to Telegram:", telegramError);
+        // Continue even if Telegram fails
+      }
     }
 
     res.json({
