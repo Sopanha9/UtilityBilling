@@ -16,7 +16,7 @@ RUN npm ci
 COPY . .
 
 # Change ownership of the app directory to the 'pptruser' user provided by the base image
-RUN chown -R pptruser:pptruser /app
+RUN chown -R pptruser:node /app
 
 # Switch back to the non-root user for security
 USER pptruser
