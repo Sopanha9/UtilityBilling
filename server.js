@@ -15,6 +15,7 @@ connectDB();
 // Routes
 app.use('/api/customers', require('./routes/customers'));
 app.use('/api/readings', require('./routes/readings')); // Changed from /api to /api/readings for better structure
+app.use('/api/auth', require('./routes/auth'));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server on port ${PORT}`));
