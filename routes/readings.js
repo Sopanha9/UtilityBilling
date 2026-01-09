@@ -116,13 +116,10 @@ router.post("/record", async (req, res, next) => {
             <body>
                 <h2>វិក្កយបត្របង់ប្រាក់</h2>
                 <div class="date">កាលបរិច្ឆេទ៖ ${new Date().toLocaleDateString(
-                  "km-KH"
-                )}</div>
+      "km-KH"
+    )}</div>
                 <div class="info">
                     <p><strong>អតិថិជន៖</strong> ${customer.name}</p>
-                    <p><strong>លេខទូរស័ព្ទ៖</strong> ${
-                      customer.phone || "N/A"
-                    }</p>
                     <p><strong>លេខកុងទ័រចាស់៖</strong> ${oldReading} Unit</p>
                     <p><strong>លេខកុងទ័រថ្មី៖</strong> ${newReading} Unit</p>
                     <p><strong>ប្រើអស់៖</strong> ${usage} Unit</p>
@@ -143,9 +140,8 @@ router.post("/record", async (req, res, next) => {
         process.env.MOM_CHAT_ID,
         pdfFile,
         {
-          caption: `វិក្កយបត្ររបស់៖ ${
-            customer.name
-          }\nសរុប៖ ${totalAmount.toLocaleString()} រៀល`,
+          caption: `វិក្កយបត្ររបស់៖ ${customer.name
+            }\nសរុប៖ ${totalAmount.toLocaleString()} រៀល`,
         },
         {
           filename: `Receipt_${customer.name}_${Date.now()}.pdf`,
