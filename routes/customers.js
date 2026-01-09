@@ -79,23 +79,7 @@ router.delete('/:id', async (req, res, next) => {
     }
 });
 
-// // API សម្រាប់ស្វែងរកអតិថិជន (ស្វែងរកតាម ឈ្មោះ ឬ លេខទូរស័ព្ទ)
-// router.get('/search', async (req, res) => {
-//     try {
-//         const query = req.query.q; // ទទួលពាក្យដែលអ្នកវាយក្នុង Search Bar
 
-//         const results = await Customer.find({
-//             $or: [
-//                 { name: { $regex: query, $options: 'i' } }, // 'i' មានន័យថាអក្សរតូចធំមិនសំខាន់
-//                 { phone: { $regex: query, $options: 'i' } }
-//             ]
-//         }).limit(10); // បង្ហាញត្រឹមតែ ១០ នាក់ដែលសមស្របជាងគេបំផុត
-
-//         res.json(results);
-//     } catch (err) {
-//         res.status(500).json({ error: "Search failed!" });
-//     }
-// });
 
 
 module.exports = router;
