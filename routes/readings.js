@@ -11,6 +11,17 @@ const upload = multer({ storage: storage });
 
 // Initialize Telegram Bot
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: false });
+// Support multiple Telegram chat IDs via env.
+// Preferred: TELEGRAM_CHAT_IDS="id1,id2". Fallbacks: MOM_CHAT_ID and ADMIN_CHAT_ID.
+const DEFAULT_MOM_CHAT_ID = "1286269182";
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || process.env.MY_CHAT_ID;
+const ENV_CHAT_IDS = process.env.TELEGRAM_CHAT_IDS
+  ? process.env.TELEGRAM_CHAT_IDS.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  : [process.env.MOM_CHAT_ID || DEFAULT_MOM_CHAT_ID, ADMIN_CHAT_ID].filter(
+      Boolean
+    );
 
 // API សម្រាប់កត់កុងទ័រ និងគណនាលុយ (Record & Bill)
 // Now accepts multipart/form-data with a 'pdfFile'
@@ -75,25 +86,47 @@ router.post("/record", upload.single("pdfFile"), async (req, res, next) => {
     customer.last_reading = newReadingNum;
     await customer.save();
 
-    // 5. ផ្ញើ PDF ទៅ Telegram
+    // 5. ផ្ញើ PDF ទៅ Telegram (to all configured chat IDs)
     if (pdfFile) {
       try {
         console.log("Sending received PDF to Telegram...");
-
-        // bot.sendDocument accepts a Buffer directly if specified with filename options
-        await bot.sendDocument(
-          process.env.MOM_CHAT_ID,
-          pdfFile.buffer,
-          {
-            caption: `វិក្កយបត្ររបស់៖ ${customer.name}\nសរុប៖ ${totalAmount.toLocaleString()} រៀល`,
-          },
-          {
-            filename: `Receipt_${customer.name}_${Date.now()}.pdf`,
-            contentType: "application/pdf",
+        for (const chatId of ENV_CHAT_IDS) {
+          try {
+            // bot.sendDocument accepts a Buffer directly if specified with filename options
+            await bot.sendDocument(
+              chatId,
+              pdfFile.buffer,
+              {
+                caption: `វិក្កយបត្ររបស់៖ ${
+                  customer.name
+                }\nសរុប៖ ${totalAmount.toLocaleString()} រៀល`,
+              },
+              {
+                filename: `Receipt_${customer.name}_${Date.now()}.pdf`,
+                contentType: "application/pdf",
+              }
+            );
+            console.log(
+              `✅ PDF sent to Telegram chat ${chatId} for ${customer.name}`
+            );
+          } catch (telegramErrorPerChat) {
+            console.error(
+              `⚠️ Failed to send to Telegram chat ${chatId}:`,
+              telegramErrorPerChat
+            );
+            // Try to notify admin so they can help
+            if (ADMIN_CHAT_ID) {
+              try {
+                await bot.sendMessage(
+                  ADMIN_CHAT_ID,
+                  `Failed to send PDF to chat ${chatId}: ${telegramErrorPerChat.message}`
+                );
+              } catch (notifyErr) {
+                console.error("⚠️ Also failed to notify admin:", notifyErr);
+              }
+            }
           }
-        );
-
-        console.log(`✅ PDF sent to Telegram for ${customer.name}`);
+        }
       } catch (telegramError) {
         console.error("⚠️ Failed to send to Telegram:", telegramError);
         // We continue even if Telegram fails, as the record is saved
@@ -102,7 +135,8 @@ router.post("/record", upload.single("pdfFile"), async (req, res, next) => {
 
     res.json({
       success: true,
-      message: "ជោគជ័យ! ទិន្នន័យត្រូវបានរក្សាទុក និង PDF ត្រូវបានផ្ញើ (ប្រសិនបើមាន)!",
+      message:
+        "ជោគជ័យ! ទិន្នន័យត្រូវបានរក្សាទុក និង PDF ត្រូវបានផ្ញើ (ប្រសិនបើមាន)!",
       data: newRecord,
     });
   } catch (err) {
